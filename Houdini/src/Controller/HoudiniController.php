@@ -9,6 +9,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Component\HttpClient\Response\CurlResponse;
 
 /**
  * Class HoudiniController
@@ -43,25 +46,33 @@ class HoudiniController
     protected $log;
 
     /**
+     * @var HttpClientInterface
+     */
+    protected $client;
+
+    /**
      * Controller constructor.
      * @param \Islandora\Crayfish\Commons\CmdExecuteService $cmd
      * @param array $formats
      * @param string $default_format
      * @param string $executable
      * @param \Psr\Log\LoggerInterface $log
+     * @param HttpClientInterface $client
      */
     public function __construct(
         CmdExecuteService $cmd,
         $formats,
         $default_format,
         $executable,
-        LoggerInterface $log
+        LoggerInterface $log,
+        HttpClientInterface $client
     ) {
         $this->cmd = $cmd;
         $this->formats = $formats;
         $this->default_format = $default_format;
         $this->executable = $executable;
         $this->log = $log;
+        $this->client = $client;
     }
 
     /**
@@ -78,12 +89,13 @@ class HoudiniController
 
     /**
      * @param \Symfony\Component\HttpFoundation\Request $request
-     * @return \Symfony\Component\HttpFoundation\Response|\Symfony\Component\HttpFoundation\StreamedResponse
+     * @return \Symfony\Component\HttpFoundation\Response|\Symfony\Component\HttpFoundation\StreamedResponse|\Symfony\Component\HttpClient\Response\CurlResponse
      */
     public function convert(Request $request)
     {
         $this->log->info('Convert request.');
 
+        $this->log->info(print_r($request->headers->all(), TRUE));
         $fedora_resource = $request->attributes->get('fedora_resource');
 
         // Get image as a resource.
@@ -117,11 +129,45 @@ class HoudiniController
 
         // Return response.
         try {
-            return new StreamedResponse(
-                $this->cmd->execute($cmd_string, $body),
-                200,
-                ['Content-Type' => $content_type]
+            $callback = $this->cmd->execute($cmd_string, $body);
+            //$cmd_out = $cmd_out();
+            $output = $this->cmd->getOutputStream();
+            rewind($output);
+            $actual = stream_get_contents($output);
+            $callback();
+            // $this->log->info($actual);
+            $response = new StreamedResponse();
+            $response->headers->set('Content-Type', $content_type);
+            $response->setCallback(function () use ($actual) {
+                echo ($actual);
+            });
+            $this->log->info("about to put back to drupal");
+            $destinationUri = $request->headers->get('X-Islandora-Destination');
+            $headers = [];
+            $headers['Content-Location'] = $request->headers->get('X-Islandora-FileUploadUri');
+            $headers['Content-Type'] = $content_type;
+            $headers['Authorization'] = $request->headers->get('Authorization');
+            $response2 = $this->client->request(
+                'PUT',
+                $destinationUri,
+                [
+                    'headers' => $headers,
+                    'body' => $actual
+                ],
             );
+
+
+            return $response;
+
+            //$response = new Response(
+            // return  new StreamedResponse(
+            //   $this->cmd->execute($cmd_string, $body),
+            //	$cmd_out,
+            // 200,
+            // ['Content-Type' => $content_type]
+            //	);
+            // $this->log->info("have response");
+            // return $response;
         } catch (\RuntimeException $e) {
             $this->log->error("RuntimeException:", ['exception' => $e]);
             return new Response($e->getMessage(), 500);
@@ -174,3 +220,4 @@ class HoudiniController
         }
     }
 }
+
