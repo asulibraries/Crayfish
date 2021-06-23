@@ -9,6 +9,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Component\HttpClient\Response\CurlResponse;
 
 /**
  * Class HomarusController
@@ -27,6 +30,11 @@ class HomarusController
    * @var \Monolog\Logger
    */
     protected $log;
+
+  /**
+   * @var \Symfony\Contracts\HttpClient\HttpClientInterface
+   */
+    protected $client;
 
   /**
    * Not used I think.
@@ -86,13 +94,14 @@ class HomarusController
         $this->default_mimetype = $default_mimetype;
         $this->executable = $executable;
         $this->log = $log;
+	$this->client = new HttpClient::create();
         $this->mime_to_format = $mime_to_format;
         $this->default_format = $default_format;
     }
 
   /**
    * @param \Symfony\Component\HttpFoundation\Request $request
-   * @return \Symfony\Component\HttpFoundation\Response|\Symfony\Component\HttpFoundation\StreamedResponse
+   * @return \Symfony\Component\HttpFoundation\Response|\Symfony\Component\HttpFoundation\StreamedResponse|\Symfony\Component\HttpClient\Response\CurlResponse
    */
     public function convert(Request $request)
     {
@@ -144,11 +153,40 @@ class HomarusController
 
         // Return response.
         try {
-            return new StreamedResponse(
-                $this->cmd->execute($cmd_string, $source),
-                200,
-                ['Content-Type' => $content_type]
+            //return new StreamedResponse(
+            //    $this->cmd->execute($cmd_string, $source),
+            //    200,
+            //    ['Content-Type' => $content_type]
+            //);
+            $callback = $this->cmd->execute($cmd_string, $source);
+            //$cmd_out = $cmd_out();
+            $output = $this->cmd->getOutputStream();
+            rewind($output);
+            $actual = stream_get_contents($output);
+            $callback();
+            // $this->log->info($actual);
+            $response = new StreamedResponse();
+            $response->headers->set('Content-Type', $content_type);
+            $response->setCallback(function () use ($actual) {
+                echo ($actual);
+            });
+            $this->log->info("about to put back to drupal");
+            $destinationUri = $request->headers->get('X-Islandora-Destination');
+            $headers = [];
+            $headers['Content-Location'] = $request->headers->get('X-Islandora-FileUploadUri');
+            $headers['Content-Type'] = $content_type;
+            $headers['Authorization'] = $request->headers->get('Authorization');
+            $response2 = $this->client->request(
+                'PUT',
+                $destinationUri,
+                [
+                    'headers' => $headers,
+                    'body' => $actual
+                ],
             );
+
+
+            return $response;
         } catch (\RuntimeException $e) {
             $this->log->error("RuntimeException:", ['exception' => $e]);
             return new Response($e->getMessage(), 500);

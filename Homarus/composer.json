@@ -3,8 +3,9 @@
     "description": "FFmpeg as a web service",
     "type": "project",
     "require": {
+        "php": "^7.3 || ^7.4",
         "islandora/crayfish-commons": "dev-dev",
-        "php": "^7.3 || ^7.4"
+        "symfony/http-client": "^5.3"
     },
     "minimum-stability": "dev",
     "prefer-stable": true,
