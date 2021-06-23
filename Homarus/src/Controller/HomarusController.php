@@ -94,7 +94,6 @@ class HomarusController
         $this->default_mimetype = $default_mimetype;
         $this->executable = $executable;
         $this->log = $log;
-	$this->client = new HttpClient::create();
         $this->mime_to_format = $mime_to_format;
         $this->default_format = $default_format;
     }
@@ -176,7 +175,8 @@ class HomarusController
             $headers['Content-Location'] = $request->headers->get('X-Islandora-FileUploadUri');
             $headers['Content-Type'] = $content_type;
             $headers['Authorization'] = $request->headers->get('Authorization');
-            $response2 = $this->client->request(
+	    $client = HttpClient::create();
+            $response2 = $client->request(
                 'PUT',
                 $destinationUri,
                 [
