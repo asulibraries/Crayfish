@@ -10,6 +10,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Component\HttpClient\Response\CurlResponse;
 
 /**
  * Class HypercubeController
@@ -39,6 +42,11 @@ class HypercubeController
     protected $log;
 
     /**
+     * @var \Symfony\Contracts\HttpClient\HttpClientInterface
+     */
+    protected $client;
+
+    /**
      * HypercubeController constructor.
      * @param \Islandora\Crayfish\Commons\CmdExecuteService $cmd
      * @param string $tesseract_executable
@@ -59,7 +67,7 @@ class HypercubeController
 
     /**
      * @param \Symfony\Component\HttpFoundation\Request $request
-     * @return \Symfony\Component\HttpFoundation\Response|\Symfony\Component\HttpFoundation\StreamedResponse
+     * @return \Symfony\Component\HttpFoundation\Response|\Symfony\Component\HttpFoundation\StreamedResponse|\Symfony\Component\HttpClient\Response\CurlResponse
      */
     public function get(Request $request)
     {
@@ -87,11 +95,41 @@ class HypercubeController
 
         // Return response.
         try {
-            return new StreamedResponse(
-                $this->cmd->execute($cmd_string, $body),
-                200,
-                ['Content-Type' => 'text/plain']
+            //return new StreamedResponse(
+            //    $this->cmd->execute($cmd_string, $body),
+            //    200,
+            //    ['Content-Type' => 'text/plain']
+	    //);
+            $callback = $this->cmd->execute($cmd_string, $body);
+            $output = $this->cmd->getOutputStream();
+            rewind($output);
+            $actual = stream_get_contents($output);
+            $callback();
+            // $this->log->info($actual);
+            $response = new StreamedResponse();
+            $response->headers->set('Content-Type', $content_type);
+            $response->setCallback(function () use ($actual) {
+                echo ($actual);
+            });
+            $this->log->info("about to put back to drupal");
+            $destinationUri = $request->headers->get('X-Islandora-Destination');
+            $headers = [];
+            $headers['Content-Location'] = $request->headers->get('X-Islandora-FileUploadUri');
+            $headers['Content-Type'] = $content_type;
+            $headers['Authorization'] = $request->headers->get('Authorization');
+	    $client = HttpClient::create();
+            $response2 = $client->request(
+                'PUT',
+                $destinationUri,
+                [
+                    'headers' => $headers,
+                    'body' => $actual
+                ],
             );
+
+
+            return $response;
+
         } catch (\RuntimeException $e) {
             return new Response($e->getMessage(), 500);
         }
